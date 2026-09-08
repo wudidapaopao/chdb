@@ -319,6 +319,26 @@ int __execvpe(const char *file, char *const argv[], char *const envp[])
 }
 
 
+/// The posix_spawn family below is compiled out of chdb (CHDB_NO_POSIX_SPAWN_COMPAT,
+/// set in this directory's CMakeLists.txt together with the removal of
+/// musl/posix_spawn.c) and glibc's own implementation is used instead.
+///
+/// These are not drop-in replacements, they are a partial reimplementation whose
+/// posix_spawn ignores file actions on purpose - see the comment at the top of
+/// musl/posix_spawn.c. Inside the ClickHouse binary that is invisible: the two callers
+/// in this tree (src/Common/OOMCanary, src/Client/JWTProvider) pass no file actions.
+/// libchdb.a is handed to a linker chdb does not control, and there a strong definition
+/// of posix_spawn in the archive silently displaces libc's for the whole program. Rust's
+/// std::process::Command spawns that way, so every redirection, current_dir and closed fd
+/// a consumer asked for was dropped without an error - chdb-io/chdb-core#216.
+///
+/// Nothing here is needed for the old-glibc guarantee that the rest of this file exists
+/// for: posix_spawn, posix_spawnp and posix_spawn_file_actions_* have been in glibc since
+/// 2.15 or earlier, well under the 2.17 floor the manylinux2014 wheels target, and the two
+/// members that do need a newer glibc (posix_spawn_file_actions_add{,f}chdir_np, 2.29) are
+/// referenced nowhere in this tree.
+#ifndef CHDB_NO_POSIX_SPAWN_COMPAT
+
 #include "spawn.h"
 
 int posix_spawnp(pid_t *restrict res, const char *restrict file,
@@ -426,6 +446,8 @@ int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *fa) {
 	}
 	return 0;
 }
+
+#endif /* CHDB_NO_POSIX_SPAWN_COMPAT */
 
 /// gettid was added in glibc 2.30. Use the raw syscall for compatibility with older systems.
 /// Rust's standard library (since ~nightly-2026) references gettid as a weak symbol;

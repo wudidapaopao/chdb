@@ -11,9 +11,12 @@
 #   Gate 3a the two checked-in export allow-lists describe the same C API contract
 #   Gate 3b every symbol in that contract is still reachable from libchdb.a
 #   Gate 4  the linked probe connects and runs a query
+#   Gate 5  the archive does not override libc's posix_spawn
 #
-# The five gates are the same on both platforms; only the tools and the condition that
-# exposes the hazard differ.
+# Gates 1 to 4 are the same on both platforms; only the tools and the condition that
+# exposes the hazard differ. Gate 5 has nothing to find on macOS - base/glibc-compatibility
+# is a Linux-only target - but its behavioural half is a real check there too, and it is
+# the half that keeps working if the archive is ever assembled a different way.
 #
 #   Mach-O  weak definitions that stay external land in the export trie and dyld may bind
 #           them to the system libc++/libc++abi. Exposed by a deployment target of 12.0 or
@@ -247,9 +250,10 @@ fi
 echo
 
 # --- Build the probe --------------------------------------------------------------------
-echo "== Building probe (${EXPOSURE}) =="
+echo "== Building probes (${EXPOSURE}) =="
 cp "${CHDB_H}" "${WORK_DIR}/chdb.h"
 cp "${MY_DIR}/static-probe/chdb_static_probe.c" "${WORK_DIR}/"
+cp "${MY_DIR}/static-probe/posix_spawn_probe.c" "${WORK_DIR}/"
 # Symlinked, not copied: the archive is around a gigabyte.
 ln -s "${LIBCHDB_A}" "${WORK_DIR}/libchdb.a"
 
@@ -334,20 +338,76 @@ echo
 
 # --- Gate 4: runtime smoke test ---------------------------------------------------------
 # The whole point of the exercise: the historical bug built cleanly and hung at run time.
-echo "== Gate 4: probe connects and runs a query =="
-# A watchdog, not a nicety: the failure this gate exists for is a hang, and macOS has no
+#
+# A watchdog, not a nicety: one failure these gates exist for is a hang, and macOS has no
 # coreutils `timeout`.
-(cd "${WORK_DIR}" && ./chdb_static_probe) &
-probe_pid=$!
-( sleep "${PROBE_TIMEOUT}"; kill -9 "${probe_pid}" 2>/dev/null ) &
-watchdog_pid=$!
-disown "${watchdog_pid}" 2>/dev/null || true
-if wait "${probe_pid}"; then
+run_probe () {
+    local probe=$1 probe_pid watchdog_pid rc=0
+    (cd "${WORK_DIR}" && "./${probe}") &
+    probe_pid=$!
+    ( sleep "${PROBE_TIMEOUT}"; kill -9 "${probe_pid}" 2>/dev/null ) &
+    watchdog_pid=$!
+    disown "${watchdog_pid}" 2>/dev/null || true
+    wait "${probe_pid}" || rc=$?
+    kill "${watchdog_pid}" 2>/dev/null || true
+    return "${rc}"
+}
+
+echo "== Gate 4: probe connects and runs a query =="
+if run_probe chdb_static_probe; then
     echo "PASS"
 else
     fail "probe did not complete successfully (killed after ${PROBE_TIMEOUT}s if it hung)"
 fi
-kill "${watchdog_pid}" 2>/dev/null || true
+echo
+
+# --- Gate 5: posix_spawn stays libc's ---------------------------------------------------
+# base/glibc-compatibility ships a partial posix_spawn that ignores file actions and reports
+# success anyway. Inside the ClickHouse binary that is invisible; in an archive handed to a
+# linker chdb does not control it displaces libc's definition for the whole program, and a
+# consumer's dup2/chdir/close requests disappear without an error - chdb-io/chdb-core#216.
+#
+# Two halves, because either one alone can be satisfied for the wrong reason. The symbol
+# half says the archive defines nothing in the family; the behavioural half links a second
+# probe against the archive and checks that the posix_spawn it actually reaches honours a
+# dup2 file action, which is the property a consumer depends on however the archive is built.
+echo "== Gate 5: the archive does not override libc's posix_spawn =="
+if ! nm -g --defined-only "${LIBCHDB_A}" > "${WORK_DIR}/archive_defined_raw.txt" 2>/dev/null; then
+    fail "nm could not read the archive; the symbol half of gate 5 was not evaluated"
+elif [ ! -s "${WORK_DIR}/archive_defined_raw.txt" ]; then
+    fail "nm read no defined symbol out of the archive - the symbol half would pass vacuously"
+else
+    # A definition line is `<addr> <type> <name>`, or `<type> <name>` where nm has no
+    # address to print; keying on the one-letter type field takes both and leaves out the
+    # archive member banners and blank lines. The Mach-O underscore is stripped so the
+    # match below is one pattern rather than two.
+    awk 'NF >= 2 && $(NF - 1) ~ /^[A-Za-z]$/ { n = $NF; sub(/^_/, "", n); print n }' \
+        "${WORK_DIR}/archive_defined_raw.txt" \
+        | sort -u > "${WORK_DIR}/archive_defined.txt"
+    grep_optional -E '^posix_spawn' "${WORK_DIR}/archive_defined.txt" \
+        > "${WORK_DIR}/spawn_defined.txt"
+    spawn_defined=$(wc -l < "${WORK_DIR}/spawn_defined.txt" | tr -d ' ')
+    echo "  archive definitions: $(wc -l < "${WORK_DIR}/archive_defined.txt" | tr -d ' '), in the posix_spawn family: ${spawn_defined}"
+    if [ "${spawn_defined}" -eq 0 ]; then
+        echo "PASS (symbols)"
+    else
+        sed 's/^/    /' "${WORK_DIR}/spawn_defined.txt"
+        fail "${spawn_defined} posix_spawn symbols are defined by the archive"
+    fi
+fi
+
+if (cd "${WORK_DIR}" && clang posix_spawn_probe.c -o posix_spawn_probe \
+            -L. -lchdb "${platform_flags[@]}" \
+        > "${WORK_DIR}/spawn_link.log" 2>&1); then
+    if run_probe posix_spawn_probe; then
+        echo "PASS (behaviour)"
+    else
+        fail "the posix_spawn reached through the archive dropped its file actions"
+    fi
+else
+    sed 's/^/    /' "${WORK_DIR}/spawn_link.log" | tail -40
+    fail "could not link the posix_spawn probe against the archive"
+fi
 echo
 
 if [ "${failures}" -ne 0 ]; then
