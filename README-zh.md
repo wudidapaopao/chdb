@@ -95,6 +95,23 @@
 pip install chdb-core
 ```
 
+### 校验下载的发布产物
+
+语言绑定和打包者会直接从 release 下载 C 库，即 `<platform>-libchdb.tar.gz`（动态库）或
+`<platform>-libchdb-static.tar.gz`（静态库）。每个 release 都附带一个覆盖全部产物的
+`SHA256SUMS`，因此下载结果可以校验，而不必假定其正确：
+
+```bash
+TAG=v26.7.2-rc.2
+BASE=https://github.com/chdb-io/chdb-core/releases/download/${TAG}
+
+curl -sSLO ${BASE}/linux-x86_64-libchdb.tar.gz
+curl -sSLO ${BASE}/SHA256SUMS
+
+# 加 --ignore-missing，只校验实际下载的文件，而不是 release 的全部产物
+sha256sum -c --ignore-missing SHA256SUMS   # macOS 上用 shasum -a 256 -c
+```
+
 ---
 
 ## 快速开始
