@@ -109,7 +109,7 @@ curl -sSLO ${BASE}/linux-x86_64-libchdb.tar.gz
 curl -sSLO ${BASE}/SHA256SUMS
 
 # 加 --ignore-missing，只校验实际下载的文件，而不是 release 的全部产物
-sha256sum -c --ignore-missing SHA256SUMS   # macOS 上用 shasum -a 256 -c
+sha256sum -c --ignore-missing SHA256SUMS   # macOS 上用 shasum -a 256 -c --ignore-missing
 ```
 
 ---

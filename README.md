@@ -110,7 +110,7 @@ curl -sSLO ${BASE}/linux-x86_64-libchdb.tar.gz
 curl -sSLO ${BASE}/SHA256SUMS
 
 # --ignore-missing so it checks the files you actually downloaded, not all of the release
-sha256sum -c --ignore-missing SHA256SUMS   # shasum -a 256 -c on macOS
+sha256sum -c --ignore-missing SHA256SUMS   # shasum -a 256 -c --ignore-missing on macOS
 ```
 
 ---
