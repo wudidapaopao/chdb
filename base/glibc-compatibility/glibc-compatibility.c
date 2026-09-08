@@ -319,24 +319,26 @@ int __execvpe(const char *file, char *const argv[], char *const envp[])
 }
 
 
-/// The posix_spawn family below is compiled out of chdb (CHDB_NO_POSIX_SPAWN_COMPAT,
-/// set in this directory's CMakeLists.txt together with the removal of
-/// musl/posix_spawn.c) and glibc's own implementation is used instead.
+/// In the static-library build the posix_spawn family below is compiled out
+/// (CHDB_NO_POSIX_SPAWN_COMPAT, set in this directory's CMakeLists.txt together with the
+/// removal of musl/posix_spawn.c) and glibc's own implementation is used instead. That
+/// CMakeLists.txt comment carries the full reasoning, including why the scope stops there;
+/// what follows is the part a reader of this code needs.
 ///
-/// These are not drop-in replacements, they are a partial reimplementation whose
+/// These are not drop-in replacements. They are a partial reimplementation whose
 /// posix_spawn ignores file actions on purpose - see the comment at the top of
-/// musl/posix_spawn.c. Inside the ClickHouse binary that is invisible: the two callers
-/// in this tree (src/Common/OOMCanary, src/Client/JWTProvider) pass no file actions.
-/// libchdb.a is handed to a linker chdb does not control, and there a strong definition
-/// of posix_spawn in the archive silently displaces libc's for the whole program. Rust's
-/// std::process::Command spawns that way, so every redirection, current_dir and closed fd
-/// a consumer asked for was dropped without an error - chdb-io/chdb-core#216.
+/// musl/posix_spawn.c. Inside the ClickHouse binary that is invisible: the two callers in
+/// this tree (src/Common/OOMCanary, src/Client/JWTProvider) pass no file actions, and
+/// chdb/libchdb_export.map keeps the symbol local in libchdb.so. libchdb.a has no link
+/// step to gate, so there a strong definition in the archive silently displaces libc's for
+/// the whole program. Rust's std::process::Command spawns that way, so every redirection,
+/// current_dir and closed fd a consumer asked for was dropped without an error -
+/// chdb-io/chdb-core#216.
 ///
-/// Nothing here is needed for the old-glibc guarantee that the rest of this file exists
-/// for: posix_spawn, posix_spawnp and posix_spawn_file_actions_* have been in glibc since
-/// 2.15 or earlier, well under the 2.17 floor the manylinux2014 wheels target, and the two
-/// members that do need a newer glibc (posix_spawn_file_actions_add{,f}chdir_np, 2.29) are
-/// referenced nowhere in this tree.
+/// Treat the family as indivisible. These posix_spawn_file_actions_* build a musl fdop
+/// list in the field glibc's posix_spawn reads as a counted __spawn_action array, so
+/// keeping half and dropping half makes a caller walk garbage rather than merely lose its
+/// file actions.
 #ifndef CHDB_NO_POSIX_SPAWN_COMPAT
 
 #include "spawn.h"
