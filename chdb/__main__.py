@@ -6,8 +6,6 @@ from chdb import query
 
 
 def main():
-    # Installed as a console script the program is `chdb`; under `python -m
-    # chdb` argparse would otherwise report `__main__.py`.
     prog = 'chdb' if os.path.basename(sys.argv[0]) == 'chdb' else 'python -m chdb'
     custom_usage = "%(prog)s [-h] \"SELECT 1\" [format]"
     description = ('''A simple command line interface for chdb
