@@ -133,6 +133,12 @@ public:
 
     void shutdown();
 
+    /// Puts the queue back into its constructed state so that it can serve a new owner. Only
+    /// meaningful for queues that outlive their SystemLog, i.e. TextLog's process-wide static one.
+    /// Note that `settings` is fixed at construction and is NOT re-applied: a second owner in the
+    /// same process keeps the first one's flush interval and size limits.
+    void restart();
+
     // producer methods
     void push(LogElement && element);
 
