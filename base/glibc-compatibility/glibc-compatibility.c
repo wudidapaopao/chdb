@@ -319,6 +319,28 @@ int __execvpe(const char *file, char *const argv[], char *const envp[])
 }
 
 
+/// In the static-library build the posix_spawn family below is compiled out
+/// (CHDB_NO_POSIX_SPAWN_COMPAT, set in this directory's CMakeLists.txt together with the
+/// removal of musl/posix_spawn.c) and glibc's own implementation is used instead. That
+/// CMakeLists.txt comment carries the full reasoning, including why the scope stops there;
+/// what follows is the part a reader of this code needs.
+///
+/// These are not drop-in replacements. They are a partial reimplementation whose
+/// posix_spawn ignores file actions on purpose - see the comment at the top of
+/// musl/posix_spawn.c. Inside the ClickHouse binary that is invisible: the two callers in
+/// this tree (src/Common/OOMCanary, src/Client/JWTProvider) pass no file actions, and
+/// chdb/libchdb_export.map keeps the symbol local in libchdb.so. libchdb.a has no link
+/// step to gate, so there a strong definition in the archive silently displaces libc's for
+/// the whole program. Rust's std::process::Command spawns that way, so every redirection,
+/// current_dir and closed fd a consumer asked for was dropped without an error -
+/// chdb-io/chdb-core#216.
+///
+/// Treat the family as indivisible. These posix_spawn_file_actions_* build a musl fdop
+/// list in the field glibc's posix_spawn reads as a counted __spawn_action array, so
+/// keeping half and dropping half makes a caller walk garbage rather than merely lose its
+/// file actions.
+#ifndef CHDB_NO_POSIX_SPAWN_COMPAT
+
 #include "spawn.h"
 
 int posix_spawnp(pid_t *restrict res, const char *restrict file,
@@ -426,6 +448,8 @@ int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *fa) {
 	}
 	return 0;
 }
+
+#endif /* CHDB_NO_POSIX_SPAWN_COMPAT */
 
 /// gettid was added in glibc 2.30. Use the raw syscall for compatibility with older systems.
 /// Rust's standard library (since ~nightly-2026) references gettid as a weak symbol;

@@ -95,6 +95,24 @@ Currently, chdb-core supports Python 3.9+ on macOS and Linux (x86_64 and ARM64).
 pip install chdb-core
 ```
 
+### Verifying a release download
+
+Language bindings and packagers fetch the C library straight from a release, as
+`<platform>-libchdb.tar.gz` (shared) or `<platform>-libchdb-static.tar.gz` (static). Every
+release also carries a `SHA256SUMS` covering all of its assets, so a download can be checked
+rather than assumed:
+
+```bash
+TAG=v26.7.2-rc.2
+BASE=https://github.com/chdb-io/chdb-core/releases/download/${TAG}
+
+curl -sSLO ${BASE}/linux-x86_64-libchdb.tar.gz
+curl -sSLO ${BASE}/SHA256SUMS
+
+# --ignore-missing so it checks the files you actually downloaded, not all of the release
+sha256sum -c --ignore-missing SHA256SUMS   # shasum -a 256 -c --ignore-missing on macOS
+```
+
 ---
 
 ## Quick Start
