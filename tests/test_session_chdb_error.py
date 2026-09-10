@@ -50,6 +50,24 @@ class TestSessionChdbError(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_unstreamable_query_is_catchable_as_runtime_error(self):
+        # chdb's datastore falls back to a non-streaming query by catching
+        # RuntimeError from send_query, so this has to stay a RuntimeError
+        with self.assertRaises(RuntimeError):
+            self.sess.send_query("CREATE TABLE t_unstreamable (a Int32) ENGINE = Memory", "CSV")
+
+    def test_error_survives_a_shadowed_chdb_error(self):
+        # the chdb wrapper ships a chdb/__init__.py that shadows chdb-core's
+        # and defines its own ChdbError(Exception), so the engine must not
+        # raise whatever that name happens to point at
+        shadowed = type("ChdbError", (Exception,), {})
+        original, chdb.ChdbError = chdb.ChdbError, shadowed
+        try:
+            with self.assertRaises(RuntimeError):
+                self.sess.query("SELECT * FROM nonexistent_table_xyz")
+        finally:
+            chdb.ChdbError = original
+
     def test_stateless_query_still_raises_chdb_error(self):
         with self.assertRaises(chdb.ChdbError):
             chdb.query("SELECT * FROM nonexistent_table_xyz")
